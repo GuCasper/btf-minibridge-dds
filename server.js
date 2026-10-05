@@ -1,6 +1,7 @@
 import http from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { Dds, loadDds } from "./api.js";
+import { analyzeDeal } from "./minibridge-dds-analysis.mjs";
 
 const PORT = Number.parseInt(process.env.PORT || "8080", 10);
 const API_TOKEN = process.env.DDS_API_TOKEN || "";
@@ -88,18 +89,19 @@ function solve(input) {
 
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/health") return json(res, 200, { ok: true, engine: "DDS" });
-  if (req.method !== "POST" || req.url !== "/solve") return json(res, 404, { error: "Not found" });
+  if (req.method !== "POST" || !["/solve", "/analyze"].includes(req.url)) return json(res, 404, { error: "Not found" });
   if (!authorized(req)) return json(res, 401, { error: "Unauthorized" });
   let size = 0; const chunks = [];
   req.on("data", (chunk) => {
     size += chunk.length;
     if (size > MAX_BODY_BYTES) req.destroy(); else chunks.push(chunk);
   });
-  req.on("end", () => {
+  req.on("end", async () => {
     if (size > MAX_BODY_BYTES) return;
     try {
       const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      json(res, 200, solve(input));
+      const analysisRequest = req.url === "/analyze" || input?.action === "analyze";
+      json(res, 200, analysisRequest ? { analysis: await analyzeDeal(dds, input) } : solve(input));
     } catch (error) {
       json(res, 400, { error: error instanceof Error ? error.message : "Invalid request" });
     }
